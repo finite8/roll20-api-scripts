@@ -1,9 +1,53 @@
 
 var vb = (function ()
 {
+      var sexTypes = expand({
+          "m,male" : "Male",
+          "f,female" : "Female"
+      });
+      var classTypes = expand({
+          "fighter" : "Fighter",
+          "barb,barbarian" : "Barbarian",
+          "bard" : "Bard",
+          "cleric": "Cleric",
+          "druid,hippie":"Druid",
+          "monk":"Monk",
+          "paladin":"Paladin",
+          "ranger":"Ranger",
+          "rogue,thief":"Rogue",
+          "sorcerer,sorc":"Sorcerer",
+          "wizard,wiz":"Wizard",
+          "warlock,lock":"Warlock"
+      });
       var messageTypes = {
         character   : "Character Event"
       };
+      function isDefined(obj)
+      {
+          return typeof obj !== 'undefined';
+      }
+      function isAnyDefined()
+      {
+          for (var i = 0; i < arguments.length; i++)
+          {
+              if (isDefined(arguments[i]))
+              {
+                  return true;
+              }
+          }
+          return false;
+      }
+      function expand(obj) {
+            var keys = Object.keys(obj);
+            for (var i = 0; i < keys.length; ++i) {
+                var key = keys[i],
+                    subkeys = key.split(/,\s?/),
+                    target = obj[key];
+                delete obj[key];
+                subkeys.forEach(function(key) { obj[key] = target; })
+            }
+            return obj;
+        }
             function parseMessage(msg)
             {
                 var result = {};
@@ -119,6 +163,7 @@ var vb = (function ()
             {
                 context.Current = {};
                 var processingFunction;
+                var postAction;
                 if (data.Type == messageTypes.character)
                 {
                     if (data.IsHelp)
@@ -129,6 +174,7 @@ var vb = (function ()
                     {
                         context.Current.SentenceParts = {};
                         processingFunction = function (ctx, cmd) {processCharacterAction(ctx, cmd)};  
+                        postAction = function (ctx) {p_characterFunctions.logResults(ctx)};
                     }
                 }
                 else
@@ -137,10 +183,26 @@ var vb = (function ()
                 }
                 if (typeof processingFunction !== 'undefined')
                 {
+                    var errors = [];
                     for (i = 0; i < data.Commands.length; i++)
                     {
-                        var cmd = data.Commands[i];
-                        processCharacterAction(context, cmd); 
+                        try
+                        {
+                            var cmd = data.Commands[i];
+                            processingFunction(context, cmd); 
+                        }
+                        catch (err)
+                        {
+                            errors.push("cmd=(" + cmd.Type + " " + cmd.Params.join(" ") + "), err=" + err.message);
+                        }
+                    }
+                    if (isDefined(postAction))
+                    {
+                        postAction(context);
+                    }
+                    if (errors.length > 0)
+                    {
+                        throw "Following errors were encountered:\r\n" + errors.join("\r\n");
                     }
                 }
                 
@@ -155,9 +217,21 @@ var vb = (function ()
                 {
                     p_characterFunctions.metAction(ctx, cmd);
                 }
+                else if (cmd.Type == "-who")
+                {
+                    p_characterFunctions.whoAction(ctx, cmd);
+                }
                 else if (cmd.Type == "-r")
                 {
                     p_characterFunctions.raceAction(ctx, cmd);
+                }
+                else if (cmd.Type == "-s")
+                {
+                     p_characterFunctions.sexAction(ctx, cmd);
+                }
+                else if (cmd.Type == "-c")
+                {
+                    p_characterFunctions.classAction(ctx, cmd);
                 }
                 else
                 {
@@ -165,7 +239,62 @@ var vb = (function ()
                 }
             }
       var p_characterFunctions = {
-
+          logResults: function (context) {
+              var sp = context.Current.SentenceParts;
+              if (isDefined(sp) && isDefined(sp.Name))
+              {
+                  var sent = "";
+                  sent = sent + "The party met [" + sp.Name + "]";
+                  if (isAnyDefined(sp.Race, sp.Sex, sp.Class))
+                  {
+                      sent = sent + ", a";
+                      if (isDefined(sp.Sex))
+                      {
+                          sent = sent + " " + sp.Sex;
+                      }
+                      if (isDefined(sp.Race))
+                      {
+                          sent = sent + " " + sp.Race;
+                      }
+                      if (isDefined(sp.Class))
+                      {
+                          sent = sent + " " + sp.Class;
+                      }
+                  }
+                  sent = sent + ".";
+                  p_journalFunctions.appendJournalLine(sent);
+              }
+          },
+          whoAction : function (ctx, cmd) {
+              var charName = cmd.Params.join(" ");
+              var r = p_sysFunctions.findCharacterSheet(charName);
+              if (isDefined(r))
+              {
+                  // we have the character
+                  ctx.CurrentChar = r;
+                  ctx.SendChat("Character context set to: " + r.name);
+              }
+              else
+              {
+                  ctx.SendChat("No character exists with name: " + charName);
+              }
+          },
+          classAction: function (ctx, cmd) {
+              this.assertCurrentCharDefined(ctx, cmd);
+              var realClass = classTypes[cmd.Params[0].toLowerCase()];
+              if (!isDefined(realClass))
+              {
+                  ctx.SendChat("Class " + cmd.Params[0] + " could not be resolved to a real class. Character sheet will resort to a default instead");
+                  ctx.Current.SentenceParts.Class = cmd.Params[0];
+                  realClass = "";
+              }
+              else
+              {
+                  ctx.Current.SentenceParts.Class = realClass;
+              }
+              p_sysFunctions.setCharacterAttribute(ctx.CurrentChar, "class", realClass);
+              p_sysFunctions.setCharacterAttribute(ctx.CurrentChar, "inputClass", cmd.Params[0]);
+          },
         metAction: function (ctx, cmd) {
             var charName = cmd.Params.join(" ");
             var r = p_sysFunctions.getCharacterSheet(charName);
@@ -176,17 +305,33 @@ var vb = (function ()
             }
             else
             {
-                broadcastMessage("The party met " + charName);
+                //broadcastMessage("The party met " + charName);
                 ctx.Current.SentenceParts.Name = charName;
             }
             ctx.CurrentChar = r.Char;
 
         },
 
+        sexAction: function (ctx, cmd) {
+            this.assertCurrentCharDefined(ctx, cmd);
+            var sex = this.parseSex(cmd.Params[0]);
+            ctx.Current.SentenceParts.Sex = sex;
+            p_sysFunctions.setCharacterAttribute(ctx.CurrentChar, "sex", sex);
+        },
+
         raceAction: function (ctx, cmd) {
             this.assertCurrentCharDefined(ctx, cmd);
             ctx.Current.SentenceParts.Race = cmd.Params.join(" ");
             p_sysFunctions.setCharacterAttribute(ctx.CurrentChar, "race", ctx.Current.SentenceParts.Race);
+        }
+        , parseSex : function(text)
+        {
+            var sex = sexTypes[text.toLowerCase()];
+            if (typeof sex == 'undefined')
+            {
+                throw text + " could not be interpreted as a valid sex";
+            }
+            return sex;
         }
         , assertCurrentCharDefined: function(ctx, cmd) {
             if (typeof ctx.CurrentChar == 'undefined')
@@ -198,33 +343,91 @@ var vb = (function ()
 
       };
 
+      var p_journalFunctions = {
+            currentSentence : "",
+            appendJournalText : function (text) {
+                currentSentence = currentSentence + text;
+                var j = this.getJournalHandout();
+                j.get("notes", function (n) {
+                    log("Existing Notes:" + n);
+                    setTimeout(function () {
+                        j.set("notes", n + text);
+                    }, 100);
+                    
+                });
+                
+                //j.notes = (j.notes || "") + text;
+                log("Writting to log:" + text);
+            },
+            appendJournalLine : function (text) {
+                
+                this.appendJournalText(text + "<br>");
+                this.finishSentence();
+            },
+            finishSentence : function ()
+            {
+                if (currentSentence !== "")
+                {
+                    broadcastMessage(currentSentence);
+                    currentSentence = "";
+                }
+            },
+
+
+            getJournalHandout : function () {
+                if (typeof this.journalHandout !== 'undefined')
+                {
+                    return this.journalHandout;
+                }
+                var handouts = findObjs({_type:"handout", name: "Adventure Log"});
+                if (handouts.length == 0)
+                {
+                    var h = createObj("handout", {name: "Adventure Log", inplayerjournals:"all", controlledby:"all", notes: ""});
+                    this.journalHandout = h;
+                }
+                else
+                {
+                    log("found existing");
+                    this.journalHandout = handouts[0];
+                }
+                this.appendJournalLine(new Date(Date.now()).toLocaleString());
+                return this.journalHandout;
+            }
+      };
+
       var p_sysFunctions = {
           getSafeCharacterName : function (charName) {
                 return "_vb_c:" + charName;
           },
+          findCharacterSheet : function (charName) {
+              var shts = findObjs({_type:"character", name: charName});
+              if (shts.length == 0)
+              {
+                  return null;
+              }
+              else
+              {
+                  return shts[0];
+              }
+          },
           getCharacterSheet : function (charName) {
-                var shts1 = findObjs({_type:"character", name: charName});
-                //var shts2 = findObjs({_type:"character", name: p_sysFunctions.getSafeCharacterName(charName)});
-                var shts = shts1;//.concat(shts2);
-                var h;
-                log(shts);
+                var char = this.findCharacterSheet(charName);
+                
                 var isNew;
-                if (shts.length != 0)
+                if (isDefined(char))
                 {
-                    h = shts[0];
                     isNew = false;
                 }
                 else
                 {
-                    h = createObj("character", {name: charName});
+                    char = createObj("character", {name: charName, inplayerjournals:"all", controlledby:"all"});
                     isNew = true;
                 }
                 
                 
                 
-                log(h);
-                log(getAttrByName(h.id, "race"));
-                return {IsNew : isNew, Char: h};
+                log(char);
+                return {IsNew : isNew, Char: char};
           },
         setCharacterAttribute: function (char, attribName, newValue)
         {
@@ -253,13 +456,21 @@ var vb = (function ()
             
             on("chat:message", function (msg) {
                 log(msg);
-                var r = parseMessage(msg);
-                if (r.IsValid)
-                {
-                    var ctx = getUserContext(msg);
-                    // we have a command and a context to work with. lets start processing.
-                    process(ctx, r);
-                }
+                //try
+                //{
+                    var r = parseMessage(msg);
+                    if (r.IsValid)
+                    {
+                        var ctx = getUserContext(msg);
+                        // we have a command and a context to work with. lets start processing.
+                        process(ctx, r);
+                    }
+                //}
+                //catch (err)
+                //{
+                //    log(err);
+                //    ctx.SendChat("Invalid command: " + err.message);
+                //}
             });
 }());
 
