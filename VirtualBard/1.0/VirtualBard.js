@@ -298,7 +298,7 @@ var vb = (function ()
         metAction: function (ctx, cmd) {
             var charName = cmd.Params.join(" ");
             var r = p_sysFunctions.getCharacterSheet(charName);
-            log(r);
+            log("Char Info: " + r);
             if (!r.IsNew)
             {
                 sendMessage(ctx.UserName, "The party is already aware of " + charName);
@@ -306,8 +306,9 @@ var vb = (function ()
             else
             {
                 //broadcastMessage("The party met " + charName);
-                ctx.Current.SentenceParts.Name = charName;
+                //ctx.Current.SentenceParts.Name = charName;
             }
+            ctx.Current.SentenceParts.Name = charName;
             ctx.CurrentChar = r.Char;
 
         },
@@ -346,7 +347,7 @@ var vb = (function ()
       var p_journalFunctions = {
             currentSentence : "",
             appendJournalText : function (text) {
-                currentSentence = currentSentence + text;
+                this.currentSentence = this.currentSentence + text;
                 var j = this.getJournalHandout();
                 j.get("notes", function (n) {
                     log("Existing Notes:" + n);
@@ -366,10 +367,10 @@ var vb = (function ()
             },
             finishSentence : function ()
             {
-                if (currentSentence !== "")
+                if (this.currentSentence !== "")
                 {
-                    broadcastMessage(currentSentence);
-                    currentSentence = "";
+                    broadcastMessage(this.currentSentence);
+                    this.currentSentence = "";
                 }
             },
 
@@ -401,6 +402,7 @@ var vb = (function ()
           },
           findCharacterSheet : function (charName) {
               var shts = findObjs({_type:"character", name: charName});
+              log(shts);
               if (shts.length == 0)
               {
                   return null;
@@ -412,9 +414,9 @@ var vb = (function ()
           },
           getCharacterSheet : function (charName) {
                 var char = this.findCharacterSheet(charName);
-                
+                log("Result:" + char);
                 var isNew;
-                if (isDefined(char))
+                if (char !== null)
                 {
                     isNew = false;
                 }
@@ -433,13 +435,14 @@ var vb = (function ()
         {
 
             var attribs = findObjs({_type:"attribute", _characterid:char.id,name:attribName});
-            //log("setting attribute");
-            //log(char);
+            log("setting attribute");
+            log(char);
             //log(findObjs({_type:"attribute", _characterid:char.id}));
             if (attribs.length == 0)
             {
                 // we instead need to insert it
                 var newAttrib = createObj("attribute", {name: attribName, current: newValue, characterid:char.id});
+                log("Inserting attribute" + attribName);
             }
             else if (attribs.length > 1)
             {
