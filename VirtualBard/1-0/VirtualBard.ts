@@ -1,4 +1,4 @@
-
+/// <reference path="..\Roll20typedef.d.ts" />
 var vb = (function ()
 {
       var sexTypes = expand({
@@ -26,9 +26,7 @@ var vb = (function ()
       var VBAttributes = {
           IsMet : "VB-IsMet"
       }
-      var NPCBioTemplate = `
-      
-      `;
+     
 
       function testCode()
       {
@@ -528,6 +526,7 @@ var vb = (function ()
                 }
                 else
                 {
+                    createObj("something", {name: "something",  });
                     log("found existing");
                     this.journalHandout = handouts[0];
                 }
@@ -568,7 +567,8 @@ var vb = (function ()
                 }
                 else
                 {
-                    char = createObj("character", {name: charName, inplayerjournals:"all", controlledby:"all"});
+                    
+                    char = createObj<Character>("character", {name: charName, inplayerjournals:"all", controlledby:"all"});
                     this.setCharacterAttribute(char, VBAttributes.IsMet, true);
                     isNew = true;
                 }
@@ -600,7 +600,7 @@ var vb = (function ()
             if (attribs.length == 0)
             {
                 // we instead need to insert it
-                var newAttrib = createObj("attribute", {name: attribName, current: newValue, characterid:char.id});
+                var newAttrib = createObj<Attribute>("attribute", {name: attribName, current: newValue, characterid:char.id});
                 log("Inserting attribute" + attribName);
             }
             else if (attribs.length > 1)
