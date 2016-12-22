@@ -20,11 +20,140 @@ var vb = (function ()
           "warlock,lock":"Warlock"
       });
       var messageTypes = {
+        test : "test",
         character   : "Character Event"
       };
+      var VBAttributes = {
+          IsMet : "VB-IsMet"
+      }
+      var NPCBioTemplate = `
+      
+      `;
+
+      function testCode()
+      {
+          var myString = "balls balls and balls and stuff<test id=\"1\" others=\"5\">someother <innerTest></innerTest></test>";
+          var r = findTag(myString, "test", {id:"1"});
+          log(r);
+          log(r.appendText("[Appended]").prependText("[Prepended]").findTag("innerTest").setText("[SetText]").getText());
+      }
+     
+
+    // returns a object that describes the results. The returned object supports additional searcing and text modification functions.
+   function findTag(baseText, tag, attributes, basis)
+    {
+        
+        var regString = "(<" + tag + "(\\b[^>]*)>)([\\s\\S]*?)(<\\\/" + tag + ">)";
+        
+        var r = new RegExp(regString, "gim");
+        var match = r.exec(baseText);
+        
+        if (match == null)
+        {
+            log("no match");
+            return null;
+        }
+
+        if (isAssigned(attributes))
+        {
+            
+            // lets go through each property pair.
+            for (var p in attributes)
+            {
+                if (attributes.hasOwnProperty(p))
+                {
+                    var attribReg = new RegExp(p + "=\"" + attributes[p] + "\"");
+                    if (attribReg.exec(match[2]) == null)
+                    {
+                        log("missing attribute");
+                    }
+                }
+            }
+        }
+
+        // if we have gotten this far, we have a positive match. lets keep going.
+        var offset;
+        var useOriginalText;
+        if (isAssigned(basis))
+        {
+            offset = basis.innerStartIndex;
+            useOriginalText = basis.originalText;
+        }
+        else
+        {
+            offset = 0;
+            useOriginalText = { value : baseText };
+        }
+        
+        var result = {
+            originalText : useOriginalText,
+            tagAttributes : match[2],
+            tag : tag,
+            endTag : match[4],
+            text : match[3],
+            startIndex : match.index + offset,
+            innerStartIndex : match.index + match[1].length + offset,
+            innerEndIndex : (match.index + match[0].length - match[4].length) + offset,
+            endIndex : match.index + match[0].length + offset,
+            getText : function () {return this.originalText.value;},
+            findTag : function(subTag, subAttributes) {
+                return findTag(result.text, subTag, subAttributes, result);
+            },
+            appendText : function(textToAppend) {
+                var txtToModify = this.originalText.value;
+                this.originalText.value = txtToModify.slice(0, this.innerEndIndex) + textToAppend + txtToModify.slice(this.innerEndIndex)
+                this.innerEndIndex += textToAppend.length;
+                this.endIndex = this.innerEndIndex + endTag.length;
+                this.text = this.originalText.value.substring(this.innerStartIndex, this.innerEndIndex);
+                return result;
+            },
+            setText : function(textToSet) {
+                var txtToModify = this.originalText.value;
+                this.originalText.value = txtToModify.slice(0, this.innerStartIndex) + textToSet + txtToModify.slice(this.innerEndIndex)
+                this.innerEndIndex = this.innerStartIndex + textToSet.length;
+                this.endIndex = this.innerEndIndex + endTag.length;
+                this.text = this.originalText.value.substring(this.innerStartIndex, this.innerEndIndex);
+                return result;
+            },
+            prependText : function(textToPrepend) {
+                var txtToModify = this.originalText.value;
+                this.originalText.value = txtToModify.slice(0, this.innerStartIndex) + textToPrepend + txtToModify.slice(this.innerStartIndex)
+                this.innerEndIndex += textToPrepend.length;
+                this.endIndex = this.innerEndIndex + endTag.length;
+                this.text = this.originalText.value.substring(this.innerStartIndex, this.innerEndIndex);
+                return result;
+            }
+        };
+        log(result);
+        return result;
+
+    }
+
       function isDefined(obj)
       {
           return typeof obj !== 'undefined';
+      }
+      function isAssigned(obj)
+      {
+          return obj != null && typeof obj !== 'undefined';
+      }
+      function assertVariableAssigned(obj, varName)
+      {
+          if (!isAssigned(obj))
+          {
+              if (obj == null)
+              {
+                  throw varName + " cannot be NULL";
+              }
+              else if (typeof obj == 'undefined')
+              {
+                  throw varName + " was not defined";
+              }
+              else
+              {
+                  throw varName + " was invalid";
+              }
+          }
       }
       function isAnyDefined()
       {
@@ -65,6 +194,10 @@ var vb = (function ()
                 else if (msg.content.indexOf("!c") == 0)
                 {
                     result.Type = messageTypes.character;
+                }
+                else if (msg.content.indexOf("!test") == 0)
+                {
+                    result.Type = messageTypes.test;
                 }
                 else
                 {
@@ -177,6 +310,10 @@ var vb = (function ()
                         postAction = function (ctx) {p_characterFunctions.logResults(ctx)};
                     }
                 }
+                else if (data.Type == messageTypes.test)
+                {
+                    testCode();
+                }
                 else
                 {
                     throw "Command not implemented";
@@ -264,6 +401,9 @@ var vb = (function ()
                   sent = sent + ".";
                   p_journalFunctions.appendJournalLine(sent);
               }
+          },
+          appendBio : function (char, text) {
+
           },
           whoAction : function (ctx, cmd) {
               var charName = cmd.Params.join(" ");
@@ -397,6 +537,7 @@ var vb = (function ()
       };
 
       var p_sysFunctions = {
+          
           getSafeCharacterName : function (charName) {
                 return "_vb_c:" + charName;
           },
@@ -412,17 +553,23 @@ var vb = (function ()
                   return shts[0];
               }
           },
+
           getCharacterSheet : function (charName) {
                 var char = this.findCharacterSheet(charName);
                 log("Result:" + char);
                 var isNew;
                 if (char !== null)
                 {
-                    isNew = false;
+                    // the NPC sheet might have been created ahead of time. Double check this to be sure.
+                    isNew = !(this.getCharacterAttribute(char, VBAttributes.IsMet) == true);
+                    
+
+                    
                 }
                 else
                 {
                     char = createObj("character", {name: charName, inplayerjournals:"all", controlledby:"all"});
+                    this.setCharacterAttribute(char, VBAttributes.IsMet, true);
                     isNew = true;
                 }
                 
@@ -431,6 +578,18 @@ var vb = (function ()
                 log(char);
                 return {IsNew : isNew, Char: char};
           },
+        getCharacterAttribute: function (char, attribName)
+        {
+            assertVariableAssigned(char, "char");
+            if (!isDefined(char.id))
+            {
+                log(char);
+                throw "id was undefined on char parameter";
+            }
+            var result = getAttrByName(char.id, attribName);
+            return result;
+
+        },
         setCharacterAttribute: function (char, attribName, newValue)
         {
 
